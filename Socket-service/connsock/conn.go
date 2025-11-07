@@ -29,11 +29,11 @@ type socketProducer struct {
 	reconnectMu  sync.Mutex
 }
 
-func NewSocketProduecer(outChan chan []byte, url string, msgChan chan error) *socketProducer {
+func NewSocketProduecer(outChan chan []byte, url string, errChan chan error) *socketProducer {
 	return &socketProducer{
 		outputChan:    outChan,
 		urlConnection: url,
-		readMsgError:  msgChan,
+		readMsgError:  errChan,
 	}
 }
 
@@ -78,7 +78,7 @@ func (sp *socketProducer) Start(ctx context.Context, wg *sync.WaitGroup) {
 		sp.mu.Unlock()
 	}()
 
-	sp.sendPong()
+	sp.sendPong(conn)
 	sp.startReadMessage(ctx, conn)
 
 	for {
@@ -160,7 +160,7 @@ func (sp *socketProducer) doReconnect(ctx context.Context) {
 	sp.conn = conn
 	sp.mu.Unlock()
 
-	sp.sendPong()
+	sp.sendPong(conn)
 	sp.startReadMessage(ctx, conn)
 
 	slog.Info("✅ Reconnection completed successfully")
@@ -243,24 +243,17 @@ func (sp *socketProducer) reconnect(ctx context.Context) (*websocket.Conn, error
 	return nil, err
 }
 
-func (sp *socketProducer) sendPong() {
-	slog.Info("🎾 Entered function 'sendPong'")
-
-	sp.mu.RLock()
-	conn := sp.conn
-	sp.mu.RUnlock()
+func (sp *socketProducer) sendPong(conn *websocket.Conn) {
+	slog.Info("🎾 Setting up Ping handler")
 
 	if conn == nil {
 		slog.Error("'sendPong' got nil connection")
 		return
 	}
 
+	// Устанавливаем handler на конкретное соединение
 	conn.SetPingHandler(func(appData string) error {
-		sp.mu.RLock()
-		curConn := sp.conn
-		sp.mu.RUnlock()
-
-		err := curConn.WriteControl(
+		err := conn.WriteControl(
 			websocket.PongMessage,
 			[]byte(appData),
 			time.Now().Add(3*time.Second),
@@ -271,7 +264,7 @@ func (sp *socketProducer) sendPong() {
 			return err
 		}
 
-		slog.Info("✅ Send Pong to binance successfuly")
+		slog.Info("✅ Send Pong to binance successfully")
 		return nil
 	})
 }
