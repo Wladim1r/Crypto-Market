@@ -33,6 +33,17 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       ALLOW_PLAINTEXT_LISTENER: yes
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # ⭐ НАСТРОЙКИ RETENTION
+      # Удалять сообщения старше 1 часа (3600000 мс)
+      KAFKA_LOG_RETENTION_MS: "3600000"
+      # Или по размеру: удалять когда топик больше 100MB
+      KAFKA_LOG_RETENTION_BYTES: "104857600"
+      # Проверять каждые 5 минут
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "300000"
+      # Размер сегмента (для быстрого удаления старых данных)
+      KAFKA_LOG_SEGMENT_BYTES: "10485760"
+      # Политика очистки: delete (удалять) или compact (компактить)
+      KAFKA_LOG_CLEANUP_POLICY: "delete"
     networks:
       - crypto-network
     volumes:
@@ -69,6 +80,45 @@ services:
       echo '✅ Kafka initialization complete'
       "
     restart: "no"
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: crypto-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - crypto-network
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    restart: always
+    ports:
+      - 8123:8123
+      - 9000:9000
+    environment:
+      CLICKHOUSE_DB: crypto
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    networks:
+      - crypto-network
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   socket-service:
     build: ./Socket-service/
@@ -108,10 +158,13 @@ services:
     depends_on:
       aggregator-service:
         condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
     ports:
       - "50071:50071"
     environment:
-      # Kafka settings
       KAFKA_BROKERS: "kafka:9092"
       KAFKA_TOPIC: "binance.miniticker"
       KAFKA_GROUP_ID: "clickhouse-consumer-group"
@@ -119,11 +172,23 @@ services:
       KAFKA_RETRY_DELAY: "2s"
       KAFKA_SESSION_TIMEOUT: "10s"
       KAFKA_HEARTBEAT_INTERVAL: "3s"
+
+      CLICKHOUSE_ADDR: "clickhouse:9000"
+      CLICKHOUSE_DATABASE: "crypto"
+      CLICKHOUSE_TABLE: "market_tickers"
+      CLICKHOUSE_USERNAME: "default"
+      CLICKHOUSE_PASSWORD: ""
+
+      BATCH_SIZE: "1000"
+      BATCH_TIMEOUT: "5s"
+      CLICKHOUSE_MAX_RETRIES: "3"
+      CLICKHOUSE_DIAL_TIMEOUT: "10s"
     networks:
       - crypto-network
 
 volumes:
   kafka-data:
+  clickhouse-data:
 
 networks:
   crypto-network:
