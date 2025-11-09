@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
 
 	"github.com/Wladim1r/aggregator/converting"
-	"github.com/Wladim1r/aggregator/kaffka"
+	// "github.com/Wladim1r/aggregator/kaffka"
 	"github.com/Wladim1r/aggregator/models"
 )
 
@@ -20,17 +21,33 @@ func main() {
 	wg := new(sync.WaitGroup)
 
 	rawMsgsChan := make(chan []byte, 100)
-	dailyStatChan := make(chan models.DailyStat, 500)
-	kafkaMsgChan := make(chan models.KafkaMsg, 500)
+	secondStatChan := make(chan models.SecondStat, 100)
+	// dailyStatChan := make(chan models.DailyStat, 500)
+	// kafkaMsgChan := make(chan models.KafkaMsg, 500)
 
-	cfg := kaffka.LoadKafkaConfig()
-	producer := kaffka.NewProducer(cfg)
+	// cfg := kaffka.LoadKafkaConfig()
+	// producer := kaffka.NewProducer(cfg)
 
-	wg.Add(4)
-	go converting.ReveiveMessage(ctx, wg, rawMsgsChan)
-	go converting.ConvertRawToArrDS(ctx, wg, rawMsgsChan, dailyStatChan)
-	go converting.ReceiveKafkaMsg(ctx, wg, dailyStatChan, kafkaMsgChan)
-	go producer.Start(ctx, wg, kafkaMsgChan)
+	wg.Add(2)
+	go converting.ReceiveAggTradeMessage(ctx, wg, rawMsgsChan)
+	// go converting.ReveiveMiniTickerMessage(ctx, wg, rawMsgsChan)
+	// go converting.ConvertRawToArrDS(ctx, wg, rawMsgsChan, dailyStatChan)
+	go converting.ConvertRawToArrSS(ctx, wg, rawMsgsChan, secondStatChan)
+	// go converting.ReceiveKafkaMsg(ctx, wg, dailyStatChan, kafkaMsgChan)
+	// go producer.Start(ctx, wg, kafkaMsgChan)
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-secondStatChan:
+				fmt.Println("==========================")
+				fmt.Println(msg)
+				fmt.Println("==========================")
+			}
+		}
+	}()
 
 	<-c
 	cancel()
