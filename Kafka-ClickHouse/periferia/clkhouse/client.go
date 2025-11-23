@@ -2,6 +2,7 @@ package clkhouse
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -43,6 +44,9 @@ func NewClient(ctx context.Context, cfg ClickHouseConfig) *Client {
 			MaxOpenConns:    10,
 			MaxIdleConns:    5,
 			ConnMaxLifetime: time.Hour,
+			Debugf: func(format string, v ...interface{}) {
+				fmt.Printf(format, v)
+			},
 		})
 
 		if err == nil {

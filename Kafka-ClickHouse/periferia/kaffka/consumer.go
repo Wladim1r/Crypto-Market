@@ -3,6 +3,7 @@ package kaffka
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -66,7 +67,7 @@ func NewConsumer(ctx context.Context, cfg kafkaConfig) *consumer {
 			slog.Debug("Kafka reader", "message", msg)
 		}),
 		ErrorLogger: kafka.LoggerFunc(func(msg string, args ...interface{}) {
-			slog.Error("Kafka reader error", "message", msg)
+			slog.Error("Kafka reader error", "message", fmt.Sprintf(msg, args...))
 		}),
 	})
 
