@@ -20,7 +20,6 @@ import (
 
 func main() {
 	db := db.MustLoad()
-	// rdb := reddis.NewClient()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
