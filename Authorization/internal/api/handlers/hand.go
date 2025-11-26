@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Wladim1r/auth/internal/api/service"
@@ -15,6 +16,7 @@ import (
 	"github.com/Wladim1r/auth/lib/hashpwd"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 type handler struct {
@@ -39,62 +41,29 @@ func (h *handler) Registration(c *gin.Context) {
 		return
 	}
 
-	err := h.s.CheckUserExists(req.Name)
-
-	if err != nil {
-		switch {
-		case errors.Is(err, errs.ErrRecordingWNF):
-			hashPwd, err := hashpwd.HashPwd([]byte(req.Password), req.Name)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"Could not hash password": err.Error(),
-				})
-				return
-			}
-
-			err = h.s.CreateUser(req.Name, hashPwd)
-			if err != nil {
-				switch {
-				case errors.Is(err, errs.ErrRecordingWNC):
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"Could not create user rawsAffected=0": err.Error(),
-					})
-					return
-
-				default:
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"Could not create user": err.Error(),
-					})
-					return
-				}
-			}
-			c.JSON(http.StatusCreated, gin.H{
-				"message": "user successful created 🎊🤩",
-			})
-			return
-
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "db error: " + err.Error(),
+	if err := h.s.RegisterUser(req.Name, req.Password); err != nil {
+		if strings.Contains(err.Error(), "unique constraint") {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "user already exists💩",
 			})
 			return
 		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not register user"})
+		return
 	}
+	c.JSON(http.StatusCreated, gin.H{"message": "user created successfully🎊🤩"})
 
-	c.JSON(http.StatusConflict, gin.H{
-		"message": "user already exsited 💩",
-	})
 }
 
-func createJWT(name string) (string, error) {
+func createJWT(userID uuid.UUID) (string, error) {
 	claims := jwt.MapClaims{
-		"sub": name,
-		"exp": time.Now().Add(40 * time.Second).Unix(),
+		"sub": userID.String(),
+		"exp": time.Now().Add(15 * time.Minute).Unix(),
 	}
 
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-	signedToken, err := jwtToken.SignedString(getenv.GetString("SECRET_KEY", "default_secret_key"))
+	signedToken, err := jwtToken.SignedString([]byte(getenv.GetString("SECRET_KEY", "default_secret_key")))
 	if err != nil {
 		return "", fmt.Errorf("failed to sign jwt: %w", err)
 	}
@@ -102,13 +71,48 @@ func createJWT(name string) (string, error) {
 	return signedToken, nil
 }
 
+func createRefreshToken(userID uuid.UUID) (string, error) {
+	claims := jwt.MapClaims{
+		"sub": userID.String(),
+		"exp": time.Now().Add(7 * 24 * time.Hour).Unix(),
+	}
+
+	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	signedToken, err := jwtToken.SignedString([]byte(getenv.GetString("SECRET_KEY", "default_secret_key")))
+
+	if err != nil {
+		return "", fmt.Errorf("failed to sign refresh jwt: %w", err)
+	}
+
+	return signedToken, nil
+}
+
 func (h *handler) Login(c *gin.Context) {
-	name, ok := getFromCtx(c, "username")
-	if !ok {
+	var req models.Request
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request",
+		})
 		return
 	}
 
-	jwt, err := createJWT(name)
+	user, err := h.s.LoginUser(req.Name, req.Password)
+	if err != nil {
+		if errors.Is(err, errs.ErrRecordingWNF) {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid credentials",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	accessToken, err := createJWT(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
@@ -116,9 +120,104 @@ func (h *handler) Login(c *gin.Context) {
 		return
 	}
 
+	refreshToken, err := createRefreshToken(user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	session := models.Session{
+		UserID:       user.ID,
+		RefreshToken: hashpwd.HashToken(refreshToken),
+		ExpiresAt:    time.Now().Add(7 * 24 * time.Hour),
+	}
+
+	if err := h.s.StoreRefreshToken(&session); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to save session",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"msg":   "Login success!🫦",
-		"token": jwt,
+		"message":       "Login success!🫦",
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+	})
+}
+
+func (h *handler) RefreshToken(c *gin.Context) {
+	var req models.RefreshRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request😕",
+		})
+		return
+	}
+
+	session, err := h.s.GetSessionByToken(req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, errs.ErrRecordingWNF) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid or expired refresh token😱",
+			})
+			return
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "database error on getting token"})
+		}
+	}
+
+	if time.Now().After(session.ExpiresAt) {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "refresh token expired😪",
+		})
+		return
+	}
+
+	if err := h.s.DeleteSessionByToken(req.RefreshToken); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "could not delete old session😧",
+		})
+		return
+	}
+
+	newAccessToken, err := createJWT(session.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	newRefreshToken, err := createRefreshToken(session.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	newSession := models.Session{
+		UserID:       session.UserID,
+		RefreshToken: hashpwd.HashToken(newRefreshToken),
+		ExpiresAt:    time.Now().Add(7 * 24 * time.Hour),
+	}
+
+	if err := h.s.StoreRefreshToken(&newSession); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Good boy💋",
+		"access_token":  newAccessToken,
+		"refrash_token": newRefreshToken,
 	})
 }
 
@@ -129,42 +228,49 @@ func (h *handler) Test(c *gin.Context) {
 }
 
 func (h *handler) Delacc(c *gin.Context) {
-	name, ok := getFromCtx(c, "username")
-	if !ok {
+	userIDAny, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "invalid token claims",
+		})
 		return
 	}
 
-	err := h.s.DeleteUser(name)
-	if err != nil {
-		switch {
-		case errors.Is(err, errs.ErrRecordingWND):
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"Could not create user rawsAffected=0": err.Error(),
-			})
-			return
+	userID := userIDAny.(uuid.UUID)
 
-		default:
+	if err := h.s.DeleteUserByID(userID); err != nil {
+		if errors.Is(err, errs.ErrRecordingWND) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user to delete not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete user"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "👍 user account and all sessions successfully deleted",
+	})
+}
+
+func (h *handler) Logout(c *gin.Context) {
+	var req models.RefreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request",
+		})
+		return
+	}
+
+	if err := h.s.DeleteSessionByToken(req.RefreshToken); err != nil {
+		if !errors.Is(err, errs.ErrRecordingWND) {
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "❌🗑️ Could not delete user: " + err.Error(),
+				"error": "could not invalidate session",
 			})
 			return
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "👍 user has successful deleted from DB",
+		"message": "logout successful",
 	})
-}
-
-func getFromCtx(c *gin.Context, key string) (string, bool) {
-	username, exists := c.Get(key)
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"err": fmt.Sprintf("context var %s does not exist", key),
-		})
-		return "", false
-	}
-	name := username.(string)
-
-	return name, true
 }

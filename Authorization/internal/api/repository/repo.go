@@ -1,112 +1,153 @@
-// Package repository
 package repository
 
-import (
-	"fmt"
-	"log/slog"
-	"os"
+// import (
+// 	"fmt"
 
-	"github.com/Wladim1r/auth/internal/models"
-	"github.com/Wladim1r/auth/lib/errs"
-	"gorm.io/gorm"
-)
+// 	"github.com/Wladim1r/auth/internal/models"
+// 	"github.com/Wladim1r/auth/lib/errs"
+// 	"gorm.io/gorm"
+// )
 
-type UsersDB interface {
-	CreateTable() error
-	CreateUser(user *models.User) error
-	DeleteUser(name string) error
-	SelectPwdByName(name string) (string, error)
-	CheckUserExists(name string) error
-}
+// type UsersDB interface {
+// 	CreateUser(user *models.User) error
+// 	DeleteUserByID(userID uint) error
+// 	SelectPwdByName(name string) (string, error)
+// 	CheckUserExists(name string) error
 
-type usersDB struct {
-	db *gorm.DB
-}
+// 	GetUserByName(name string) (*models.User, error)
+// 	StoreRefreshToken(session *models.Session) error
+// 	GetByRefreshTokenHash(token string) (*models.Session, error)
+// 	DeleteByRefreshTokenHash(token string) error
+// 	DeleteAllUserSessions(userID uint) error
+// }
 
-func NewRepository(db *gorm.DB) UsersDB {
-	return &usersDB{
-		db: db,
-	}
-}
+// type usersDB struct {
+// 	db *gorm.DB
+// }
 
-func (db *usersDB) CreateTable() error {
+// func NewRepository(db *gorm.DB) UsersDB {
+// 	return &usersDB{
+// 		db: db,
+// 	}
+// }
 
-	// create table
-	if err := db.db.Migrator().CreateTable(&models.User{}); err != nil {
-		slog.Error("Could not create db table", "error", err.Error())
-		os.Exit(1)
-	}
 
-	// check table exists or not
-	if ok := db.db.Migrator().HasTable(&models.User{}); !ok {
-		slog.Error("Table has not created idk")
-		os.Exit(1)
-	}
+// func (db *usersDB) CreateUser(user *models.User) error {
+// 	result := db.db.Create(&user)
 
-	if ok := db.db.Migrator().HasTable("users"); !ok {
-		slog.Error("Table has not created idk")
-		os.Exit(1)
-	}
+// 	if result.RowsAffected == 0 {
+// 		return errs.ErrRecordingWNC
+// 	}
 
-	return nil
-}
+// 	if result.Error != nil {
+// 		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+// 	}
 
-func (db *usersDB) CreateUser(user *models.User) error {
-	result := db.db.Create(&user)
+// 	return nil
+// }
 
-	if result.RowsAffected == 0 {
-		return errs.ErrRecordingWNC
-	}
+// func (db *usersDB) DeleteUserByID(userID uint) error {
+// 	result := db.db.Where("id = ?", userID).Delete(&models.User{})
+// 	if result.RowsAffected == 0 {
+// 		return errs.ErrRecordingWND
+// 	}
 
-	if result.Error != nil {
-		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
-	}
+// 	if result.Error != nil {
+// 		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
-func (db *usersDB) DeleteUser(name string) error {
-	result := db.db.Where("name = ?", name).Delete(&models.User{})
+// func (db *usersDB) SelectPwdByName(name string) (string, error) {
+// 	var user models.User
 
-	if result.RowsAffected == 0 {
-		return errs.ErrRecordingWND
-	}
+// 	result := db.db.Table("users").Select("password").Where("name = ?", name).Scan(&user)
 
-	if result.Error != nil {
-		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
-	}
+// 	if result.RowsAffected == 0 {
+// 		return "", errs.ErrRecordingWNF
+// 	}
 
-	return nil
-}
+// 	if result.Error != nil {
+// 		return "", fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+// 	}
 
-func (db *usersDB) SelectPwdByName(name string) (string, error) {
-	var user models.User
+// 	return user.Password, nil
+// }
 
-	result := db.db.Table("users").Select("password").Where("name = ?", name).Scan(&user)
+// func (db *usersDB) CheckUserExists(name string) error {
+// 	var user models.User
 
-	if result.RowsAffected == 0 {
-		return "", errs.ErrRecordingWNF
-	}
+// 	result := db.db.Table("users").Select("id").Where("name = ?", name).Scan(&user)
 
-	if result.Error != nil {
-		return "", fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
-	}
+// 	if result.RowsAffected == 0 {
+// 		return errs.ErrRecordingWNF
+// 	}
 
-	return user.Password, nil
-}
+// 	if result.Error != nil {
+// 		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+// 	}
 
-func (db *usersDB) CheckUserExists(name string) error {
-	var user models.User
+// 	return nil
+// }
 
-	result := db.db.Table("users").Select("id").Where("name = ?", name).Scan(&user)
+// func (db *usersDB) GetUserByName(name string) (*models.User, error) {
+// 	var user models.User
 
-	if result.RowsAffected == 0 {
-		return errs.ErrRecordingWNF
-	}
+// 	result := db.db.Where("name = ?", name).First(&user)
 
-	if result.Error != nil {
-		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
-	}
+// 	if result.RowsAffected == 0 {
+// 		return nil, errs.ErrRecordingWNF
+// 	}
 
-	return nil
-}
+// 	if result.Error != nil {
+// 		return nil, fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+// 	}
+
+// 	return &user, nil
+// }
+
+// func (db *usersDB) StoreRefreshToken(session *models.Session) error {
+	
+// 	result := db.db.Create(session)
+
+// 	if result.Error != nil {
+// 		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+// 	}
+
+// 	return nil
+// }
+
+// func (db *usersDB) GetByRefreshTokenHash(tokenHash string) (*models.Session, error) {
+// 	var session models.Session
+
+// 	result := db.db.Where("refresh_token = ?", tokenHash).First(&session)
+
+// 	if result.Error != nil {
+// 		return nil, fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+// 	}
+
+// 	return &session, nil
+// }
+
+// func (db *usersDB) DeleteByRefreshTokenHash(tokenHash  string) error {
+// 	result := db.db.Where("refresh_token = ?", tokenHash).Delete(&models.Session{})
+
+// 	if err := result.Error; err != nil {
+//         return fmt.Errorf("%w: %s", errs.ErrDB, err.Error())
+//     }
+
+// 	if result.RowsAffected == 0 {
+// 		return errs.ErrRecordingWND
+// 	}
+
+// 	return nil
+// }
+
+// func (db *usersDB) DeleteAllUserSessions(userID uint) error {
+// 	result := db.db.Where("user_id = ?", userID).Delete(&models.Session{})
+// 	if result.Error != nil {
+// 		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+// 	}
+// 	return nil
+// }

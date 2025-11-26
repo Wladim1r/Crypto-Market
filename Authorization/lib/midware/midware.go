@@ -2,19 +2,15 @@
 package midware
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	repo "github.com/Wladim1r/auth/internal/api/repository"
-	"github.com/Wladim1r/auth/internal/models"
-	"github.com/Wladim1r/auth/lib/errs"
 	"github.com/Wladim1r/auth/lib/getenv"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
+	"github.com/google/uuid"
 )
 
 func verifyToken(c *gin.Context, token string) error {
@@ -47,16 +43,22 @@ func verifyToken(c *gin.Context, token string) error {
 		return fmt.Errorf("token life time has expired")
 	}
 
-	nameRaw, ok := claims["sub"]
+	sub, ok := claims["sub"]
 	if !ok {
-		return fmt.Errorf("field 'username' did not found")
-	}
-	name, ok := nameRaw.(string)
-	if !ok {
-		return fmt.Errorf("failed to parse nameRaw into string")
+		return fmt.Errorf("sub claim not found")
 	}
 
-	c.Set("username", name)
+	userID, ok := sub.(string)
+	if !ok {
+		return fmt.Errorf("sub claim is not a number")
+	}
+
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("sub claim is not a valid uuid: %w", err)
+	}
+
+	c.Set("userID", userUUID)
 	return nil
 }
 
@@ -84,47 +86,6 @@ func CheckAuth() gin.HandlerFunc {
 			return
 		}
 
-		c.Next()
-	}
-}
-
-func CheckUserExists(db repo.UsersDB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req models.Request
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": err.Error(),
-			})
-			c.Abort()
-			return
-		}
-
-		password, err := db.SelectPwdByName(req.Name)
-		if err != nil {
-			switch {
-			case errors.Is(err, errs.ErrRecordingWNF):
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"message": "user does not registered ❌",
-				})
-				c.Abort()
-				return
-			default:
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": "db error: " + err.Error(),
-				})
-				c.Abort()
-				return
-			}
-		}
-
-		if err := bcrypt.CompareHashAndPassword([]byte(password), []byte(req.Password)); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"err": "passwords not equal 🚫🟰",
-			})
-			c.Abort()
-		}
-
-		c.Set("username", req.Name)
 		c.Next()
 	}
 }
