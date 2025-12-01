@@ -9,16 +9,16 @@ import (
 )
 
 type TokenService interface {
-	SaveToken(userID int, expAt time.Time) (access, refresh string, err error)
+	SaveToken(userID uint, expAt time.Time) (access, refresh string, err error)
 	RefreshAccessToken(
 		refreshToken string,
 		userID int,
 		expAt time.Time,
 	) (access, refresh string, err error)
-	DeleteToken(shashedToken string) error
+	DeleteToken(hashedToken string) error
 }
 
-func (s *service) SaveToken(userID int, expAt time.Time) (string, string, error) {
+func (s *service) SaveToken(userID uint, expAt time.Time) (string, string, error) {
 
 	user, err := s.ur.SelectUserByID(uint(userID))
 	if err != nil {
@@ -62,7 +62,7 @@ func (s *service) RefreshAccessToken(
 		return "", "", fmt.Errorf("%w: life time finished", errs.ErrTokenTTL)
 	}
 
-	access, err := createAccessJWT(userID)
+	access, err := createAccessJWT(uint(userID))
 	if err != nil {
 		return "", "", err
 	}

@@ -17,3 +17,8 @@ type Coin struct {
 	UserProfileID uint
 	UserProfile   UserProfile `gorm:"constraint:OnDelete:CASCADE;"`
 }
+
+type UserRequest struct {
+	Name     string `json:"name"     binding:"required"`
+	Password string `json:"password" binding:"required"`
+}

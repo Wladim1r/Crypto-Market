@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Wladim1r/auth/lib/errs"
 	"github.com/Wladim1r/auth/lib/getenv"
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
 )
 
-func createAccessJWT(userID int) (string, error) {
+func createAccessJWT(userID uint) (string, error) {
 	ttl := getenv.GetTime("ACCESS_TTL", 30*time.Second)
 	claims := jwt.MapClaims{
 		"sub": userID,
@@ -23,7 +24,7 @@ func createAccessJWT(userID int) (string, error) {
 		[]byte(getenv.GetString("SECRET_KEY", "default_secret_key")),
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to sign jwt: %w", err)
+		return "", fmt.Errorf("%w: %s", errs.ErrSignToken, err.Error())
 	}
 
 	return signedToken, nil

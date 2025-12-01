@@ -11,9 +11,9 @@ import (
 
 type UserRepository interface {
 	CreateTable()
-	CreateUser(user *models.User) (int, error)
+	CreateUser(user *models.User) error
 	DeleteUser(userID uint) error
-	SelectPwdByName(name string) (string, error)
+	SelectPwdByName(name string) (uint, string, error)
 	CheckUserExistsByName(name string) error
 	CheckUserExistsByID(userID uint) error
 	SelectUserByID(userID uint) (*models.User, error)
@@ -37,18 +37,18 @@ func (r *repository) CreateTable() {
 	}
 }
 
-func (r *repository) CreateUser(user *models.User) (int, error) {
+func (r *repository) CreateUser(user *models.User) error {
 	result := r.db.Create(&user)
 
 	if result.RowsAffected == 0 {
-		return -1, errs.ErrRecordingWNC
+		return errs.ErrRecordingWNC
 	}
 
 	if result.Error != nil {
-		return -1, fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
 	}
 
-	return int(user.ID), nil
+	return nil
 }
 
 func (r *repository) DeleteUser(userID uint) error {
@@ -65,20 +65,20 @@ func (r *repository) DeleteUser(userID uint) error {
 	return nil
 }
 
-func (r *repository) SelectPwdByName(name string) (string, error) {
+func (r *repository) SelectPwdByName(name string) (uint, string, error) {
 	var user models.User
 
 	result := r.db.Table("users").Select("password").Where("name = ?", name).Scan(&user)
 
 	if result.RowsAffected == 0 {
-		return "", errs.ErrRecordingWNF
+		return 0, "", errs.ErrRecordingWNF
 	}
 
 	if result.Error != nil {
-		return "", fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+		return 0, "", fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
 	}
 
-	return user.Password, nil
+	return user.ID, user.Password, nil
 }
 
 func (r *repository) CheckUserExistsByName(name string) error {

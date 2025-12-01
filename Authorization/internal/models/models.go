@@ -18,8 +18,3 @@ type RefreshToken struct {
 	UserID uint
 	User   User `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 }
-
-type UserRequest struct {
-	Name     string `json:"name"     binding:"required"`
-	Password string `json:"password" binding:"required"`
-}

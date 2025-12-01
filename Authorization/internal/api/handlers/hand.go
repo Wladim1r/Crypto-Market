@@ -2,260 +2,269 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/Wladim1r/auth/internal/api/repository"
 	"github.com/Wladim1r/auth/internal/api/service"
-	"github.com/Wladim1r/auth/internal/models"
 	"github.com/Wladim1r/auth/lib/errs"
 	"github.com/Wladim1r/auth/lib/getenv"
 	"github.com/Wladim1r/auth/lib/hashpwd"
-	"github.com/gin-gonic/gin"
+	"github.com/Wladim1r/proto-crypto/gen/protos/auth-portfile"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 type handler struct {
+	auth.UnimplementedAuthServer
 	us service.UserService
 	ts service.TokenService
+	ur repository.UserRepository
 }
 
-func NewHandler(uServ service.UserService, tServ service.TokenService) *handler {
-	return &handler{
+func RegisterServer(
+	gRPC *grpc.Server,
+	uServ service.UserService,
+	tServ service.TokenService,
+	uRepo repository.UserRepository,
+) {
+	auth.RegisterAuthServer(gRPC, &handler{
 		us: uServ,
 		ts: tServ,
-	}
+		ur: uRepo,
+	})
 }
 
-func (h *handler) Registration(c *gin.Context) {
-	var req models.UserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
+func (h *handler) Register(ctx context.Context, req *auth.AuthRequest) (*auth.AuthResponse, error) {
+	name := req.GetName()
+	password := req.GetPassword()
 
-	err := h.us.CheckUserExistsByName(req.Name)
+	err := h.us.CheckUserExistsByName(name)
 
 	if err != nil {
 		switch {
 		case errors.Is(err, errs.ErrRecordingWNF):
-			hashPwd, err := hashpwd.HashPwd([]byte(req.Password))
+			hashPwd, err := hashpwd.HashPwd([]byte(password))
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"Could not hash password": err.Error(),
-				})
-				return
+				return &auth.AuthResponse{
+					Status: http.StatusInternalServerError,
+				}, fmt.Errorf("Could not hash password: %w", err)
 			}
 
-			userID, err := h.us.CreateUser(req.Name, hashPwd)
-			if err != nil {
+			if err := h.us.CreateUser(name, hashPwd); err != nil {
 				switch {
 				case errors.Is(err, errs.ErrRecordingWNC):
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"Could not create user rawsAffected=0": err.Error(),
-					})
-					return
+					return &auth.AuthResponse{
+						Status: http.StatusInternalServerError,
+					}, fmt.Errorf("Could not create user rawsAffected=0: %w", err)
 
 				default:
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"Could not create user": err.Error(),
-					})
-					return
+					return &auth.AuthResponse{
+						Status: http.StatusInternalServerError,
+					}, fmt.Errorf("Could not create user: %w", err)
 				}
 			}
 
-			userIDstr := strconv.Itoa(userID)
-			refreshTTL := getenv.GetTime("REFRESH_TTL", 150*time.Second)
-
-			c.SetCookie(
-				"userID",
-				userIDstr,
-				int(refreshTTL),
-				"/",
-				getenv.GetString("COOKIE_DOMAIN", "localhost"),
-				false,
-				true,
-			)
-
-			c.JSON(http.StatusCreated, gin.H{
-				"message": "user successful created 🎊🤩",
-			})
-			return
+			return &auth.AuthResponse{
+				Status: http.StatusCreated,
+			}, nil
 
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "db error: " + err.Error(),
-			})
-			return
+			return &auth.AuthResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("db error: %w", err)
 		}
 	}
 
-	c.JSON(http.StatusConflict, gin.H{
-		"message": "user already exsited 💩",
-	})
+	return &auth.AuthResponse{
+		Status: http.StatusConflict,
+	}, nil
 }
 
-func (h *handler) Login(c *gin.Context) {
-	userID, ok := getFromCtx[int](c, "user_id")
-	if !ok {
-		return
+func (h *handler) Login(ctx context.Context, req *auth.AuthRequest) (*auth.AuthResponse, error) {
+	name := req.GetName()
+	password := req.GetPassword()
+
+	userID, err := checkUserExists(name, password, h.ur)
+	if err != nil {
+		switch {
+		case errors.Is(err, errs.ErrRecordingWNF):
+			return &auth.AuthResponse{
+				Status: http.StatusNotFound,
+			}, err
+		case errors.Is(err, errs.ErrDB):
+			return &auth.AuthResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("db error: %w", err)
+		default:
+			return &auth.AuthResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("unknown error: %w", err)
+		}
 	}
 
 	refreshTTL := getenv.GetTime("REFRESH_TTL", 150*time.Second)
 
 	access, refresh, err := h.ts.SaveToken(userID, time.Now().Add(refreshTTL))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	c.SetCookie(
-		"refreshToken",
-		refresh,
-		int(refreshTTL),
-		"/",
-		getenv.GetString("COOKIE_DOMAIN", "localhost"),
-		false,
-		true,
-	)
-
-	tStruct := struct {
-		Access  string `json:"access"`
-		Refresh string `json:"refresh"`
-	}{
-		Access:  access,
-		Refresh: refresh,
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"msg":                  "Login success!🫦",
-		"Here is your tokens🌐": tStruct,
-	})
-}
-
-func (h *handler) Test(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"message": "molodec! 👍",
-	})
-}
-
-func (h *handler) Logout(c *gin.Context) {
-	token, ok := getFromCtx[string](c, "refresh_token")
-	if !ok {
-		return
-	}
-
-	if err := h.ts.DeleteToken(token); err != nil {
 		switch {
 		case errors.Is(err, errs.ErrRecordingWNF):
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": err.Error(),
-			})
+			return &auth.AuthResponse{
+				Status: http.StatusNotFound,
+			}, fmt.Errorf("could not found user: %w", err)
+		case errors.Is(err, errs.ErrRecordingWNC):
+			return &auth.AuthResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("could not create token: %w", err)
 		case errors.Is(err, errs.ErrDB):
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+			return &auth.AuthResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("db error: %w", err)
+		case errors.Is(err, errs.ErrSignToken):
+			return &auth.AuthResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("jwt error: %w", err)
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"unknown error": err.Error(),
-			})
+			return &auth.AuthResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("unknown error: %w", err)
 		}
-		return
 	}
 
-	cookieDomain := getenv.GetString("COOKIE_DOMAIN", "localhost")
-	c.SetCookie("refreshToken", "", -1, "/", cookieDomain, false, true)
-	c.SetCookie("userID", "", -1, "/", cookieDomain, false, true)
+	userIDstr := strconv.Itoa(int(userID))
 
-	c.JSON(http.StatusOK, gin.H{
-		"msg": "you've successfully logouted",
-	})
+	userIDHeader := metadata.Pairs(
+		"x-user-id", userIDstr,
+		"x-access-token", access,
+		"x-refresh-token", refresh,
+	)
+	grpc.SendHeader(ctx, userIDHeader)
 
+	return &auth.AuthResponse{
+		Status: http.StatusOK,
+	}, nil
 }
 
-func (h *handler) Delacc(c *gin.Context) {
-	userID, ok := getFromCtx[int](c, "user_id")
+func (h *handler) Refresh(
+	ctx context.Context,
+	req *auth.EmptyRequest,
+) (*auth.TokenResponse, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return
+		return &auth.TokenResponse{
+			Status: http.StatusInternalServerError,
+		}, fmt.Errorf("could not found metadata in grpc context")
 	}
 
-	err := h.us.DeleteUser(userID)
+	userIDstr := md.Get("x-user-id")
+	userID, err := strconv.Atoi(userIDstr[0])
 	if err != nil {
-		switch {
-		case errors.Is(err, errs.ErrRecordingWND):
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"Could not delete user rawsAffected=0": err.Error(),
-			})
-			return
-
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "❌🗑️ Could not delete user: " + err.Error(),
-			})
-			return
-		}
+		panic(err)
 	}
 
-	cookieDomain := getenv.GetString("COOKIE_DOMAIN", "localhost")
-	c.SetCookie("refreshToken", "", -1, "/", cookieDomain, false, true)
-	c.SetCookie("userID", "", -1, "/", cookieDomain, false, true)
+	refreshToken := md.Get("x-refresh-token")[0]
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "👍 user has successful deleted from DB",
-	})
-}
-
-func (h *handler) Refresh(c *gin.Context) {
-	token, ok := getFromCtx[string](c, "refresh_token")
-	if !ok {
-		return
-	}
-	userID, ok := getFromCtx[int](c, "user_id")
-	if !ok {
-		return
-	}
 	refreshTTL := getenv.GetTime("REFRESH_TTL", 150*time.Second)
 
-	access, refresh, err := h.ts.RefreshAccessToken(token, userID, time.Now().Add(refreshTTL))
+	access, refresh, err := h.ts.RefreshAccessToken(
+		refreshToken,
+		userID,
+		time.Now().Add(refreshTTL),
+	)
 	if err != nil {
 		switch {
-		case errors.Is(err, errs.ErrTokenTTL):
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": err.Error(),
-			})
 		case errors.Is(err, errs.ErrRecordingWNF):
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": err.Error(),
-			})
+			return &auth.TokenResponse{
+				Status: http.StatusNotFound,
+			}, fmt.Errorf("could not found user: %w", err)
+		case errors.Is(err, errs.ErrTokenTTL):
+			return &auth.TokenResponse{
+				Status: http.StatusForbidden,
+			}, err
+		case errors.Is(err, errs.ErrRecordingWNC):
+			return &auth.TokenResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("could not create token: %w", err)
 		case errors.Is(err, errs.ErrDB):
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+			return &auth.TokenResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("db error: %w", err)
+		case errors.Is(err, errs.ErrSignToken):
+			return &auth.TokenResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("jwt error: %w", err)
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"unknown error": err.Error(),
-			})
+			return &auth.TokenResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("unknown error: %w", err)
 		}
-		return
 	}
 
-	c.SetCookie(
-		"refreshToken",
-		refresh,
-		int(refreshTTL),
-		"/",
-		getenv.GetString("COOKIE_DOMAIN", "localhost"),
-		false,
-		true,
-	)
+	return &auth.TokenResponse{
+		Status:  http.StatusOK,
+		Access:  access,
+		Refresh: refresh,
+	}, nil
+}
 
-	c.JSON(http.StatusOK, gin.H{
-		"msg":         "tokens have refreshed",
-		"new access":  access,
-		"new refresh": refresh,
-	})
+func (h *handler) Logout(ctx context.Context, req *auth.EmptyRequest) (*auth.LoginResponse, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return &auth.LoginResponse{
+			Status: http.StatusInternalServerError,
+		}, fmt.Errorf("could not found metadata in grpc context")
+	}
+
+	refreshToken := md.Get("x-refresh-token")[0]
+	authHeader := md.Get("x-authorization-header")[0]
+
+	if err := checkAuth(authHeader, h.ur); err != nil {
+		switch {
+		case errors.Is(err, errs.ErrEmptyAuthHeader):
+			return &auth.LoginResponse{
+				Status: http.StatusUnauthorized,
+			}, fmt.Errorf("user is not registered: %w", err)
+		case errors.Is(err, errs.ErrInvalidToken):
+			return &auth.LoginResponse{
+				Status: http.StatusForbidden,
+			}, err
+		case errors.Is(err, errs.ErrTokenTTL):
+			return &auth.LoginResponse{
+				Status: http.StatusForbidden,
+			}, err
+		case errors.Is(err, errs.ErrRecordingWNF):
+			return &auth.LoginResponse{
+				Status: http.StatusNotFound,
+			}, fmt.Errorf("user does not exist: %w", err)
+		case errors.Is(err, errs.ErrDB):
+			return &auth.LoginResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("db error: %w", err)
+		default:
+			return &auth.LoginResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("unknown error: %w", err)
+		}
+	}
+
+	if err := h.ts.DeleteToken(refreshToken); err != nil {
+		switch {
+		case errors.Is(err, errs.ErrDB):
+			return &auth.LoginResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("db error: %w", err)
+		default:
+			return &auth.LoginResponse{
+				Status: http.StatusInternalServerError,
+			}, fmt.Errorf("unknown error: %w", err)
+		}
+	}
+
+	return &auth.LoginResponse{
+		Status: http.StatusOK,
+	}, nil
 }
