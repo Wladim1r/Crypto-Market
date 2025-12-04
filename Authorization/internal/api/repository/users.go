@@ -11,7 +11,7 @@ import (
 
 type UserRepository interface {
 	CreateTable()
-	CreateUser(user *models.User) error
+	CreateUser(user *models.User) (uint, error)
 	DeleteUser(userID uint) error
 	SelectPwdByName(name string) (uint, string, error)
 	CheckUserExistsByName(name string) error
@@ -37,18 +37,18 @@ func (r *repository) CreateTable() {
 	}
 }
 
-func (r *repository) CreateUser(user *models.User) error {
+func (r *repository) CreateUser(user *models.User) (uint, error) {
 	result := r.db.Create(&user)
 
 	if result.RowsAffected == 0 {
-		return errs.ErrRecordingWNC
+		return 0, errs.ErrRecordingWNC
 	}
 
 	if result.Error != nil {
-		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+		return 0, fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
 	}
 
-	return nil
+	return user.ID, nil
 }
 
 func (r *repository) DeleteUser(userID uint) error {

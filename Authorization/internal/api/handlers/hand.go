@@ -53,7 +53,8 @@ func (h *handler) Register(ctx context.Context, req *auth.AuthRequest) (*auth.Em
 				return nil, status.Error(codes.Internal, "Could not hash password: "+err.Error())
 			}
 
-			if err := h.us.CreateUser(name, hashPwd); err != nil {
+			userID, err := h.us.CreateUser(name, hashPwd)
+			if err != nil {
 				switch {
 				case errors.Is(err, errs.ErrRecordingWNC):
 					return nil, status.Error(
@@ -64,6 +65,14 @@ func (h *handler) Register(ctx context.Context, req *auth.AuthRequest) (*auth.Em
 					return nil, status.Error(codes.Internal, "Could not create user: "+err.Error())
 				}
 			}
+
+			userIDstr := strconv.Itoa(int(userID))
+
+			userIDHeader := metadata.Pairs(
+				"x-user-id", userIDstr,
+			)
+			grpc.SendHeader(ctx, userIDHeader)
+
 			return &auth.Empty{}, nil
 
 		default:
@@ -100,6 +109,7 @@ func (h *handler) Login(ctx context.Context, req *auth.AuthRequest) (*auth.Token
 
 		case errors.Is(err, errs.ErrRecordingWNC):
 			return nil, status.Error(codes.Internal, "could not create token: "+err.Error())
+
 		case errors.Is(err, errs.ErrDB):
 			return nil, status.Error(codes.Internal, "db error: "+err.Error())
 

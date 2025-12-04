@@ -6,14 +6,14 @@ import (
 )
 
 type UserService interface {
-	CreateUser(name string, password []byte) error
+	CreateUser(name string, password []byte) (uint, error)
 	DeleteUser(userID int) error
 	SelectPwdByName(name string) (uint, string, error)
 	CheckUserExistsByName(name string) error
 	CheckUserExistsByID(userID int) error
 }
 
-func (s *service) CreateUser(name string, password []byte) error {
+func (s *service) CreateUser(name string, password []byte) (uint, error) {
 	user := models.User{
 		Name:     name,
 		Password: string(password),
