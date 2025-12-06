@@ -21,14 +21,15 @@ import (
 
 type handler struct {
 	ctx context.Context
-	s   service.Service
+	userService service.UserService
+	tokenService service.TokenService
 }
 
-func NewHandler(ctx context.Context, service service.Service) *handler {
+func NewHandler(ctx context.Context, userService service.UserService, tokenService service.TokenService) *handler {
 	return &handler{
 		ctx: ctx,
-		s:   service,
-		// rdb: rdb,
+		userService: userService,
+		tokenService: tokenService,
 	}
 }
 
@@ -41,7 +42,7 @@ func (h *handler) Registration(c *gin.Context) {
 		return
 	}
 
-	if err := h.s.RegisterUser(req.Name, req.Password); err != nil {
+	if err := h.userService.RegisterUser(req.Name, req.Password); err != nil {
 		if strings.Contains(err.Error(), "unique constraint") {
 			c.JSON(http.StatusConflict, gin.H{
 				"error": "user already exists💩",
@@ -71,23 +72,6 @@ func createJWT(userID uuid.UUID) (string, error) {
 	return signedToken, nil
 }
 
-func createRefreshToken(userID uuid.UUID) (string, error) {
-	claims := jwt.MapClaims{
-		"sub": userID.String(),
-		"exp": time.Now().Add(7 * 24 * time.Hour).Unix(),
-	}
-
-	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	signedToken, err := jwtToken.SignedString([]byte(getenv.GetString("SECRET_KEY", "default_secret_key")))
-
-	if err != nil {
-		return "", fmt.Errorf("failed to sign refresh jwt: %w", err)
-	}
-
-	return signedToken, nil
-}
-
 func (h *handler) Login(c *gin.Context) {
 	var req models.Request
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -97,7 +81,7 @@ func (h *handler) Login(c *gin.Context) {
 		return
 	}
 
-	user, err := h.s.LoginUser(req.Name, req.Password)
+	user, err := h.userService.LoginUser(req.Name, req.Password)
 	if err != nil {
 		if errors.Is(err, errs.ErrRecordingWNF) {
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -120,45 +104,49 @@ func (h *handler) Login(c *gin.Context) {
 		return
 	}
 
-	refreshToken, err := createRefreshToken(user.ID)
+	refreshToken, err := hashpwd.GenerateRandomString(32)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
+			"error": "could not generate refresh token.",
 		})
 		return
 	}
 
+	hashedRefreshToken := hashpwd.HashToken(refreshToken)
+
 	session := models.Session{
 		UserID:       user.ID,
-		RefreshToken: hashpwd.HashToken(refreshToken),
+		RefreshToken: hashedRefreshToken,
 		ExpiresAt:    time.Now().Add(7 * 24 * time.Hour),
 	}
 
-	if err := h.s.StoreRefreshToken(&session); err != nil {
+	if err := h.tokenService.StoreRefreshToken(&session); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "failed to save session",
 		})
 		return
 	}
 
+	c.SetCookie("userID", user.ID.String(), 3600*24*7, "/", "localhost", true, false)
+	c.SetCookie("refreshToken", refreshToken, 3600*24*7, "/", "localhost", true, true)
+
 	c.JSON(http.StatusOK, gin.H{
-		"message":       "Login success!🫦",
-		"access_token":  accessToken,
-		"refresh_token": refreshToken,
+		"message":      "Login success!🫦",
+		"access_token": accessToken,
 	})
+
 }
 
 func (h *handler) RefreshToken(c *gin.Context) {
-	var req models.RefreshRequest
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid request😕",
+	refreshToken, err := c.Cookie("refreshToken")
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": errs.ErrInvalidToken.Error(),
 		})
 		return
 	}
 
-	session, err := h.s.GetSessionByToken(req.RefreshToken)
+	session, err := h.tokenService.GetSessionByToken(hashpwd.HashToken(refreshToken))
 	if err != nil {
 		if errors.Is(err, errs.ErrRecordingWNF) {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -171,6 +159,8 @@ func (h *handler) RefreshToken(c *gin.Context) {
 		}
 	}
 
+	c.SetCookie("refreshToken", "", -1, "/", "localhost", true, true)
+
 	if time.Now().After(session.ExpiresAt) {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "refresh token expired😪",
@@ -178,7 +168,7 @@ func (h *handler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	if err := h.s.DeleteSessionByToken(req.RefreshToken); err != nil {
+	if err := h.tokenService.DeleteSessionByToken(hashpwd.HashToken(refreshToken)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "could not delete old session😧",
 		})
@@ -193,31 +183,34 @@ func (h *handler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	newRefreshToken, err := createRefreshToken(session.UserID)
+	newRefreshToken, err := hashpwd.GenerateRandomString(32)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
+			"error": "could not generate refresh token.",
 		})
 		return
 	}
+
+	newHashedRefreshToken := hashpwd.HashToken(newRefreshToken)
 
 	newSession := models.Session{
 		UserID:       session.UserID,
-		RefreshToken: hashpwd.HashToken(newRefreshToken),
+		RefreshToken: newHashedRefreshToken,
 		ExpiresAt:    time.Now().Add(7 * 24 * time.Hour),
 	}
 
-	if err := h.s.StoreRefreshToken(&newSession); err != nil {
+	if err := h.tokenService.StoreRefreshToken(&newSession); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
 		})
 		return
 	}
 
+	c.SetCookie("refreshToken", newRefreshToken, 3600*24*7, "/", "localhost", true, true)
+
 	c.JSON(http.StatusOK, gin.H{
-		"message":       "Good boy💋",
-		"access_token":  newAccessToken,
-		"refrash_token": newRefreshToken,
+		"message":      "Good boy💋",
+		"access_token": newAccessToken,
 	})
 }
 
@@ -238,7 +231,7 @@ func (h *handler) Delacc(c *gin.Context) {
 
 	userID := userIDAny.(uuid.UUID)
 
-	if err := h.s.DeleteUserByID(userID); err != nil {
+	if err := h.userService.DeleteUserByID(userID); err != nil {
 		if errors.Is(err, errs.ErrRecordingWND) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "user to delete not found"})
 		} else {
@@ -253,15 +246,15 @@ func (h *handler) Delacc(c *gin.Context) {
 }
 
 func (h *handler) Logout(c *gin.Context) {
-	var req models.RefreshRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid request",
+	refreshToken, err := c.Cookie("refreshToken")
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": errs.ErrInvalidToken.Error(),
 		})
 		return
 	}
 
-	if err := h.s.DeleteSessionByToken(req.RefreshToken); err != nil {
+	if err := h.tokenService.DeleteSessionByToken(hashpwd.HashToken(refreshToken)); err != nil {
 		if !errors.Is(err, errs.ErrRecordingWND) {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "could not invalidate session",
@@ -269,6 +262,9 @@ func (h *handler) Logout(c *gin.Context) {
 			return
 		}
 	}
+
+	c.SetCookie("userID", "", -1, "/", "localhost", true, false)
+	c.SetCookie("refreshToken", "", -1, "/", "localhost", true, true)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "logout successful",
