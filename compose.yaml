@@ -1,5 +1,5 @@
 services:
-  postgres:
+  postgres_auth:
     image: postgres:15
     restart: always
     ports:
@@ -7,11 +7,31 @@ services:
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_USER: postgres
-      POSTGRES_DB: users
+      POSTGRES_DB: auth_db
     volumes:
-      - postgres-data:/data
+      - postgres-data-auth:/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", postgres]
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - crypto-network
+
+  postgres_profile:
+    image: postgres:15
+    restart: always
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: profile_db
+    volumes:
+      - postgres-data-profile:/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -23,10 +43,13 @@ services:
     build: ./Authorization/
     env_file:
       - ./Authorization/.env
+    environment:
+      - POSTGRES_HOST=postgres_auth
+      - POSTGRES_DB=auth_db
     container_name: auth-service
     restart: on-failure:5
     depends_on:
-      postgres:
+      postgres_auth:
         condition: service_healthy
     ports:
       - "50051:50051"
@@ -35,10 +58,19 @@ services:
 
   profile:
     build: ./Profile/
-    # env_file:
-    #   - ./Profile/.env
+    env_file:
+      - ./Profile/.env
+    environment:
+      - POSTGRES_HOST=postgres_profile
+      - POSTGRES_DB=profile_db
+      - GRPC_ADDR=authorization:50051
     container_name: profile-service
     restart: on-failure
+    depends_on:
+      postgres_profile:
+        condition: service_healthy
+      authorization:
+        condition: service_started
     ports:
       - "8080:8080"
     networks:
@@ -332,7 +364,8 @@ volumes:
   kafka-data:
   redis-data:
   clickhouse-data:
-  postgres-data:
+  postgres-data-auth:
+  postgres-data-profile:
 
 networks:
   crypto-network:
