@@ -13,11 +13,12 @@ import (
 )
 
 func MustLoad() *gorm.DB {
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=5432 sslmode=disable",
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
 		getenv.GetString("POSTGRES_HOST", "postgres"),
 		getenv.GetString("POSTGRES_USER", "postgres"),
 		getenv.GetString("POSTGRES_PASSWORD", "postgres"),
 		getenv.GetString("POSTGRES_DB", "users"),
+		getenv.GetString("POSTGRES_PORT", "5432"),
 	)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{

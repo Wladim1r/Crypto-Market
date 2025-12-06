@@ -121,13 +121,6 @@ func (h *handler) Login(ctx context.Context, req *auth.AuthRequest) (*auth.Token
 		}
 	}
 
-	userIDstr := strconv.Itoa(int(userID))
-
-	userIDHeader := metadata.Pairs(
-		"x-user-id", userIDstr,
-	)
-	grpc.SendHeader(ctx, userIDHeader)
-
 	return &auth.TokenResponse{Access: access, Refresh: refresh}, nil
 }
 
