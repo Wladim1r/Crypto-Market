@@ -19,7 +19,7 @@ func NewHandler(us service.UsersService, cs service.CoinsService) *handler {
 	return &handler{us: us, cs: cs}
 }
 
-func (h *handler) CoinsGet(c *gin.Context) {
+func (h *handler) GetCoins(c *gin.Context) {
 	userIDany, ok := c.Get("user_id")
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{
@@ -54,7 +54,7 @@ func (h *handler) CoinsGet(c *gin.Context) {
 	})
 }
 
-func (h *handler) CoinAdd(c *gin.Context) {
+func (h *handler) AddCoin(c *gin.Context) {
 	var req models.CoinRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -96,7 +96,7 @@ func (h *handler) CoinAdd(c *gin.Context) {
 	})
 }
 
-func (h *handler) CoinUpdate(c *gin.Context) {
+func (h *handler) UpdateCoin(c *gin.Context) {
 	var req models.CoinRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -134,7 +134,7 @@ func (h *handler) CoinUpdate(c *gin.Context) {
 	})
 }
 
-func (h *handler) CoinDelete(c *gin.Context) {
+func (h *handler) DeleteCoin(c *gin.Context) {
 	var req models.CoinRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{

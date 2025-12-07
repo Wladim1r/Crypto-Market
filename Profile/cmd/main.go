@@ -65,10 +65,10 @@ func main() {
 	{
 		coins := v2.Group("/coin")
 		{
-			coins.GET("/symbols", handler.CoinsGet)
-			coins.POST("/symbol", handler.CoinAdd)
-			coins.PATCH("/symbol", handler.CoinUpdate)
-			coins.DELETE("/symbol", handler.CoinDelete)
+			coins.GET("/symbols", handler.GetCoins)
+			coins.POST("/symbol", handler.AddCoin)
+			coins.PATCH("/symbol", handler.UpdateCoin)
+			coins.DELETE("/symbol", handler.DeleteCoin)
 		}
 	}
 
