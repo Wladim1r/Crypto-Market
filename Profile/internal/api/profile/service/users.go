@@ -28,7 +28,7 @@ func (r *service) CreateUserProfile(userIDstr string, name string) error {
 	return r.ur.CreateUserProfile(user)
 }
 
-func (r *service) GetUserProfileByUserID(userID int) (*models.User, error) {
+func (r *service) GetUserProfileByUserID(userID float64) (*models.User, error) {
 	return r.ur.GetUserProfileByUserID(uint(userID))
 }
 

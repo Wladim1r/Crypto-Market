@@ -12,11 +12,11 @@ type CoinsService interface {
 	DeleteCoin(userID float64, symbol string) error
 }
 
-func (ps *service) GetCoins(userID int) ([]*models.Coin, error) {
+func (ps *service) GetCoins(userID float64) ([]*models.Coin, error) {
 	return ps.cr.GetCoins(uint(userID))
 }
 
-func (ps *service) AddCoin(userID int, symbol string, quantity float32) error {
+func (ps *service) AddCoin(userID float64, symbol string, quantity float32) error {
 	q := decimal.NewFromFloat32(quantity)
 
 	coin := models.Coin{Symbol: symbol, Quantity: q, UserID: uint(userID)}
@@ -24,12 +24,12 @@ func (ps *service) AddCoin(userID int, symbol string, quantity float32) error {
 	return ps.cr.AddCoin(&coin)
 }
 
-func (ps *service) UpdateCoin(userID int, symbol string, quantity float32) error {
+func (ps *service) UpdateCoin(userID float64, symbol string, quantity float32) error {
 	q := decimal.NewFromFloat32(quantity)
 
 	return ps.cr.UpdateCoin(uint(userID), symbol, q)
 }
 
-func (ps *service) DeleteCoin(userID int, symbol string) error {
+func (ps *service) DeleteCoin(userID float64, symbol string) error {
 	return ps.cr.DeleteCoin(uint(userID), symbol)
 }

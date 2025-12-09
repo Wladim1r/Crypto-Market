@@ -20,6 +20,18 @@ type Coin struct {
 	User   User `gorm:"constraint:OnDelete:CASCADE;"`
 }
 
+type Profile struct {
+	ID    uint
+	Name  string
+	Coins CoinsProfile
+}
+
+type CoinsProfile struct {
+	Quantities map[string]decimal.Decimal
+	Prices     map[string]decimal.Decimal
+	Totals     map[string]decimal.Decimal
+}
+
 type UserRequest struct {
 	Name     string `json:"name"     binding:"required"`
 	Password string `json:"password" binding:"required"`
@@ -30,14 +42,12 @@ type CoinRequest struct {
 	Quantity float32 `json:"quantity" binding:"required"`
 }
 
-// type SecondStat struct {
-// 	EventTime int64   `json:"E"` // Время когда сервер отправил
-// 	Symbol    string  `json:"s"` // Торговая пара
-// 	Price     float64 `json:"p"` // Цена сделки
-// 	Quantity  string  `json:"q"` // Объем сделки
-// 	TradeTime int64   `json:"T"` // Время самой сделки
-// }
-//
+type SecondStat struct {
+	UserID uint    `json:"user_id"`
+	Symbol string  `json:"s"`
+	Price  float32 `json:"p"`
+}
+
 // type MarketTicker struct {
 // 	MessageID     string          `db:"message_id"`
 // 	EventType     string          `db:"event_type"`
